@@ -1,8 +1,14 @@
 import asyncio
+import logging
 import time
 from urllib.parse import urljoin
 import yaml
-from aiohttp import web, ClientSession
+from aiohttp import ClientSession, web
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 
 class RateLimiter:
     def __init__(self, requests_per_minute, max_connections):
@@ -12,19 +18,16 @@ class RateLimiter:
         self.last_update = time.monotonic()
 
     async def acquire(self):
-        # while True:
+        # while True: return 429 instead of wait
         now = time.monotonic()
         time_passed = now - self.last_update
-        self.tokens = min(
-            self.max_connections, self.tokens + time_passed * self.rate
-        )
+        self.tokens = min(self.max_connections, self.tokens + time_passed * self.rate)
         self.last_update = now
 
         if self.tokens >= 1:
             self.tokens -= 1
             return True
         return False
-
         # await asyncio.sleep(0.1)
 
 
@@ -42,9 +45,15 @@ class ReverseProxy:
         return self.limiters[key]
 
     async def handle_request(self, request):
+        start_time = time.time()
+        request_timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
         for url_config in self.config["allowed_urls"]:
             if request.path.startswith(url_config["source"]):
                 if request.method not in url_config["methods"]:
+                    logger.info(
+                        f"{request_timestamp} - Path: {request.path} - Method: {request.method} - Status: 405 - Response Time: {(time.time() - start_time):.4f}s"
+                    )
                     return web.Response(status=405, text="Method not allowed")
 
                 # Apply throttling
@@ -53,6 +62,9 @@ class ReverseProxy:
                 )
                 limiter = self.get_limiter(throttle_key, url_config["throttle"])
                 if not await limiter.acquire():
+                    logger.info(
+                        f"{request_timestamp} - Path: {request.path} - Method: {request.method} - Status: 429 - Response Time: {(time.time() - start_time):.4f}s"
+                    )
                     return web.Response(status=429, text="Rate limit exceeded")
 
                 # Proxy the request
@@ -74,13 +86,15 @@ class ReverseProxy:
                         headers=headers,
                         data=await request.read(),
                     ) as resp:
-                        return web.Response(
+                        response = web.Response(
                             status=resp.status,
                             headers=resp.headers,
                             body=await resp.read(),
                         )
-
-        return web.Response(status=404, text="Not found")
+                        logger.info(
+                            f"{request_timestamp} - Path: {request.path} - Method: {request.method} - Status: {resp.status} - Response Time: {(time.time() - start_time):.4f}s"
+                        )
+                        return response
 
 
 async def main():
