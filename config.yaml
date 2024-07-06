@@ -1,0 +1,29 @@
+ 
+global_host: "https://icanhazip.com"
+ip_header: X-Forwarded-For
+throttle_key_header: X-User-ID
+retry_config:
+  max_retries: 3
+  retry_delay: 2  # in seconds
+global_throttle:
+  max_connections: 200
+  requests_per_minute: 100
+  requests_per_hour: 2000
+ip_whitelist:
+  - 192.168.1.100
+  - 10.0.0.1
+allowed_urls:
+  - source: /a
+    # host: https://icanhazip.com
+    destination: /
+    methods:
+      - GET
+      - POST
+    throttle:
+      max_connections: 1
+      requests_per_minute: 2
+  - source: /g
+    destination: /
+    # host: https://google.com
+    methods:
+      - GET
